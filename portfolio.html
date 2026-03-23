@@ -4870,6 +4870,25 @@
     </main>
 
 
+
+
+    <div class="deposit-history-modal-overlay" id="depositHistoryModal" aria-hidden="true">
+        <div class="deposit-history-modal" role="dialog" aria-modal="true" aria-labelledby="depositHistoryModalTitle">
+            <div class="deposit-history-modal-header">
+                <div class="deposit-history-modal-title-wrap">
+                    <h3 class="deposit-history-modal-title" id="depositHistoryModalTitle">Deposit History</h3>
+                    <p class="deposit-history-modal-subtitle">Your recent deposit submissions and review status.</p>
+                </div>
+                <button type="button" class="deposit-history-close" id="depositHistoryCloseBtn" aria-label="Close deposit history">
+                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+                </button>
+            </div>
+            <div class="deposit-history-modal-body">
+                <div class="deposit-history-list" id="depositHistoryList"></div>
+            </div>
+        </div>
+    </div>
+
     <!-- ============================================
          JAVASCRIPT
          ============================================ -->
@@ -11069,24 +11088,5 @@
 
         })();
     </script>
-
-    <!-- Supabase-backed persistence for trades, balances, and deposits -->
-
-    <div class="deposit-history-modal-overlay" id="depositHistoryModal" aria-hidden="true">
-        <div class="deposit-history-modal" role="dialog" aria-modal="true" aria-labelledby="depositHistoryModalTitle">
-            <div class="deposit-history-modal-header">
-                <div class="deposit-history-modal-title-wrap">
-                    <h3 class="deposit-history-modal-title" id="depositHistoryModalTitle">Deposit History</h3>
-                    <p class="deposit-history-modal-subtitle">Your recent deposit submissions and review status.</p>
-                </div>
-                <button type="button" class="deposit-history-close" id="depositHistoryCloseBtn" aria-label="Close deposit history">
-                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
-                </button>
-            </div>
-            <div class="deposit-history-modal-body">
-                <div class="deposit-history-list" id="depositHistoryList"></div>
-            </div>
-        </div>
-    </div>
 </body>
 </html>

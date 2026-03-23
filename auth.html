@@ -1219,12 +1219,12 @@
         /* ==========================================
            STATE
            ========================================== */
-        var currentMode = 'login'; // 'login' or 'register'
-        var otpPurpose = '';       // 'signup' or 'recovery' or 'login'
-        var currentEmail = '';
+        var currentMode    = 'login';  // 'login' | 'register'
+        var otpPurpose     = '';       // 'signup' | 'recovery' | 'login'
+        var currentEmail   = '';
         var currentPassword = '';
         var currentFullName = '';
-        var signupHiveId = null;
+        var signupHiveId   = null;     // THE ONLY HIVE ALLOWED FOR OTP VERIFICATION
         var otpCountdownTimer = null;
 
         /* ==========================================
@@ -1290,6 +1290,15 @@
         var successCountdown = document.getElementById('successCountdown');
 
         /* ==========================================
+           BUTTON HTML CONSTANTS
+           ========================================== */
+        var LOGIN_BTN_HTML = 'Login <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>';
+        var REGISTER_BTN_HTML = 'Register Now <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>';
+        var VERIFY_BTN_HTML = 'Verify Code <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>';
+        var SEND_RESET_BTN_HTML = 'Send Reset Code <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>';
+        var UPDATE_PW_BTN_HTML = 'Update Password <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>';
+
+        /* ==========================================
            UTILITIES
            ========================================== */
         function showStep(stepId) {
@@ -1298,7 +1307,6 @@
             });
             var el = document.getElementById(stepId);
             if (el) el.classList.add('active');
-            // Scroll to top
             window.scrollTo({ top: 0, behavior: 'smooth' });
         }
 
@@ -1395,6 +1403,19 @@
             }, 1000);
         }
 
+        /** Helper: get the Supabase client for signupHiveId (or fallback to stored) */
+        function getHiveClient() {
+            var ICS = window.InvestCoreSupabase;
+            var hid = signupHiveId;
+            if (hid === null || hid === undefined) {
+                hid = ICS.getStoredHiveId();
+            }
+            if (hid !== null && hid !== undefined) {
+                return ICS.getClient({ hiveId: hid });
+            }
+            return ICS.getClient();
+        }
+
         /* ==========================================
            PASSWORD STRENGTH METER
            ========================================== */
@@ -1431,7 +1452,7 @@
                 authStepLabel.textContent = 'Get Started';
                 authStepTitle.textContent = 'Create Your Account';
                 authStepDesc.textContent = 'Join thousands of investors leveraging AI-driven trading.';
-                authSubmit.innerHTML = 'Register Now <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>';
+                authSubmit.innerHTML = REGISTER_BTN_HTML;
                 authToggleText.innerHTML = 'Already have an account? <a id="authToggleLink" href="javascript:void(0)">Login here</a>.';
                 passwordInput.setAttribute('autocomplete', 'new-password');
                 passwordInput.placeholder = 'Create a strong password';
@@ -1449,7 +1470,7 @@
                 authStepLabel.textContent = 'Account Access';
                 authStepTitle.textContent = 'Welcome Back';
                 authStepDesc.textContent = 'Sign in to access your AI-driven investment portfolio.';
-                authSubmit.innerHTML = 'Login <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>';
+                authSubmit.innerHTML = LOGIN_BTN_HTML;
                 authToggleText.innerHTML = 'New to InvestCore? <a id="authToggleLink" href="javascript:void(0)">Register here</a>.';
                 passwordInput.setAttribute('autocomplete', 'current-password');
                 passwordInput.placeholder = 'Enter your password';
@@ -1512,14 +1533,20 @@
 
         /* ==========================================
            INIT USER BALANCE ROW
-           After successful auth, ensure user_balances row exists
+           Uses signupHiveId ONLY — never scans all hives.
            ========================================== */
         async function initUserBalance() {
             try {
-                var storedHiveId = window.InvestCoreSupabase.getStoredHiveId();
-                var client = window.InvestCoreSupabase.getClient(
-                    (storedHiveId !== null) ? { hiveId: storedHiveId } : undefined
-                );
+                var ICS = window.InvestCoreSupabase;
+                // Prefer signupHiveId, fall back to stored hive
+                var hid = signupHiveId;
+                if (hid === null || hid === undefined) {
+                    hid = ICS.getStoredHiveId();
+                }
+                var client = (hid !== null && hid !== undefined)
+                    ? ICS.getClient({ hiveId: hid })
+                    : ICS.getClient();
+
                 if (!client) {
                     console.warn('[Auth] initUserBalance: no Supabase client available');
                     return;
@@ -1547,7 +1574,7 @@
         }
 
         /* ==========================================
-           HANDLE LOGIN
+           HANDLE LOGIN  (Flow 1)
            ========================================== */
         async function handleLogin(email, password) {
             authSubmit.disabled = true;
@@ -1556,7 +1583,7 @@
 
             try {
                 await window.InvestCoreSupabase.signInAcrossHives(email, password);
-                // Ensure user_balances row exists after login
+                // Successful password login — store hive context is handled by signInAcrossHives
                 await initUserBalance();
                 setStatus(authStatus, 'Login successful. Redirecting to portfolio…', 'success');
                 setTimeout(function() {
@@ -1566,42 +1593,111 @@
                 }, 900);
             } catch (error) {
                 console.error('[Auth] handleLogin error:', error);
+
                 if (error.code === 'EMAIL_NOT_CONFIRMED' || /email.*not.*confirmed|not.*confirmed.*email/i.test(error.message)) {
-                    // Email not confirmed — send OTP for confirmation
+                    // Email not confirmed — need to send OTP for verification
                     currentEmail = email;
                     currentPassword = password;
-                    otpPurpose = 'signup';
+                    // Set purpose to 'login' so post-verification goes to portfolio
+                    otpPurpose = 'login';
+
                     setStatusHTML(authStatus,
                         '<div style="display:flex;flex-direction:column;gap:8px;">' +
                         '<div style="display:flex;align-items:center;gap:8px;">' +
                         '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>' +
                         '<strong style="color:#fbbf24;">Email Not Confirmed</strong>' +
                         '</div>' +
-                        '<p style="margin:0;font-size:var(--font-size-sm);color:#fde68a;line-height:1.5;">Please confirm your email first. We\'ll send you a verification code now.</p>' +
+                        '<p style="margin:0;font-size:var(--font-size-sm);color:#fde68a;line-height:1.5;">Your email needs verification. Enter the code we sent to your inbox.</p>' +
                         '</div>',
                         'warning'
                     );
-                    // Automatically send OTP for signup confirmation
+
+                    // Send OTP — find the correct hive and record it
                     setTimeout(function() {
-                        sendOTPForConfirmation(email);
+                        sendOTPForUnconfirmedLogin(email);
                     }, 1500);
                 } else {
                     setStatus(authStatus, sanitizeError(error.message), 'error');
                 }
             } finally {
                 authSubmit.disabled = false;
-                authSubmit.innerHTML = 'Login <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>';
+                authSubmit.innerHTML = LOGIN_BTN_HTML;
             }
         }
 
         /* ==========================================
-           HANDLE REGISTER
+           SEND OTP FOR UNCONFIRMED LOGIN  (Flow 1 sub)
+           Loops hives to SEND, records signupHiveId.
+           This loop is safe — signInWithOtp with
+           shouldCreateUser:false cannot create users.
+           ========================================== */
+        async function sendOTPForUnconfirmedLogin(email) {
+            try {
+                var hives = window.InvestCoreSupabase.getUserHives();
+                var sent = false;
+
+                // Try signInWithOtp on each hive until one succeeds
+                for (var i = 0; i < hives.length; i++) {
+                    var hiveId = i + 1;
+                    var client = window.InvestCoreSupabase.getClient({ hiveId: hiveId });
+                    try {
+                        var result = await client.auth.signInWithOtp({
+                            email: email,
+                            options: { shouldCreateUser: false }
+                        });
+                        if (!result.error) {
+                            sent = true;
+                            signupHiveId = hiveId;  // RECORD the hive
+                            break;
+                        }
+                    } catch (e) {
+                        // Continue to next hive
+                    }
+                }
+
+                if (!sent) {
+                    // Fallback: try auth.resend on each hive
+                    for (var j = 0; j < hives.length; j++) {
+                        var hid = j + 1;
+                        var cl = window.InvestCoreSupabase.getClient({ hiveId: hid });
+                        try {
+                            var res = await cl.auth.resend({ type: 'signup', email: email });
+                            if (!res.error) {
+                                sent = true;
+                                signupHiveId = hid;  // RECORD the hive
+                                break;
+                            }
+                        } catch (e2) {
+                            // Continue
+                        }
+                    }
+                }
+
+                if (sent) {
+                    currentEmail = email;
+                    otpEmailDisplay.textContent = email;
+                    otpDescription.textContent = 'Your email needs verification. Enter the code we sent to your inbox.';
+                    otpCode.value = '';
+                    hideStatus(otpStatusEl);
+                    showStep('step-otp');
+                    startOtpCountdown();
+                } else {
+                    setStatus(authStatus, 'Unable to send verification code. Please try again.', 'error');
+                }
+            } catch (err) {
+                console.error('[Auth] sendOTPForUnconfirmedLogin error:', err);
+                setStatus(authStatus, 'Unable to send verification code. Please try again.', 'error');
+            }
+        }
+
+        /* ==========================================
+           HANDLE REGISTER  (Flow 2)
            ========================================== */
         async function handleRegister(email, password) {
             var fullName = fullnameInput.value.trim();
             var confirmPw = confirmPasswordInput.value;
-            var registerButtonHTML = 'Register Now <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>';
 
+            // --- Validation ---
             if (!fullName) {
                 setStatus(authStatus, 'Please enter your full name.', 'error');
                 return;
@@ -1620,13 +1716,13 @@
             }
 
             authSubmit.disabled = true;
-            authSubmit.innerHTML = 'Checking…';
+            authSubmit.innerHTML = '<span class="btn-spinner"></span> Checking…';
             setStatus(authStatus, 'Checking your email…', 'success');
 
             try {
+                /* ---- Step A: Email existence check (parallel, safe) ---- */
                 var hives = window.InvestCoreSupabase.getUserHives();
-                var emailCheckFailed = false;
-                var emailExists = false;
+                var emailExistsOnHive = null; // will hold hiveId if found
 
                 try {
                     var checkResults = await Promise.all(hives.map(function(_, index) {
@@ -1642,21 +1738,21 @@
                         });
                     }));
 
-                    var successfulChecks = checkResults.filter(function(entry) {
-                        return entry && entry.result && !entry.result.error;
-                    });
-                    var failedChecks = checkResults.filter(function(entry) {
-                        return entry && entry.error;
-                    });
-
-                    emailExists = successfulChecks.length > 0;
-                    emailCheckFailed = successfulChecks.length === 0 && failedChecks.length === checkResults.length;
+                    // Find first hive where signInWithOtp succeeded (email exists)
+                    for (var c = 0; c < checkResults.length; c++) {
+                        if (checkResults[c] && checkResults[c].result && !checkResults[c].result.error) {
+                            emailExistsOnHive = checkResults[c].hiveId;
+                            break;
+                        }
+                    }
                 } catch (checkError) {
                     console.warn('[Auth] Email existence check failed, proceeding with signup:', checkError);
-                    emailCheckFailed = true;
+                    // emailExistsOnHive stays null — proceed with signup
                 }
 
-                if (emailExists) {
+                if (emailExistsOnHive !== null) {
+                    // Email already exists — record the hive, show OTP for login
+                    signupHiveId = emailExistsOnHive;
                     currentEmail = email;
                     currentPassword = password;
                     otpPurpose = 'login';
@@ -1666,15 +1762,12 @@
                     hideStatus(otpStatusEl);
                     showStep('step-otp');
                     startOtpCountdown();
+                    authSubmit.disabled = false;
+                    authSubmit.innerHTML = REGISTER_BTN_HTML;
                     return;
                 }
 
-                if (emailCheckFailed) {
-                    authSubmit.disabled = false;
-                    authSubmit.innerHTML = registerButtonHTML;
-                }
-
-                authSubmit.disabled = true;
+                /* ---- Step B: Signup ---- */
                 authSubmit.innerHTML = '<span class="btn-spinner"></span> Creating account…';
                 setStatus(authStatus, 'Creating your account…', 'success');
 
@@ -1688,11 +1781,10 @@
                 currentEmail = email;
                 currentPassword = password;
                 currentFullName = fullName;
-                signupHiveId = signUpResult.hiveId;
+                signupHiveId = signUpResult.hiveId;  // RECORD the signup hive
                 otpPurpose = 'signup';
 
-                // Send OTP immediately after signup using signInWithOtp
-                // This is the only reliable way to trigger an OTP email for a new user
+                /* ---- Step C: Send OTP on signupHiveId ONLY ---- */
                 var otpSent = false;
                 try {
                     var otpClient = window.InvestCoreSupabase.getClient({ hiveId: signupHiveId });
@@ -1703,19 +1795,19 @@
                     if (!otpResult.error) {
                         otpSent = true;
                     } else {
-                        console.warn('[Auth] signInWithOtp failed, trying resend fallback:', otpResult.error.message);
+                        console.warn('[Auth] signInWithOtp failed on hive ' + signupHiveId + ', trying resend:', otpResult.error.message);
                     }
-                } catch(otpErr) {
-                    console.warn('[Auth] signInWithOtp threw:', otpErr);
+                } catch (otpErr) {
+                    console.warn('[Auth] signInWithOtp threw on hive ' + signupHiveId + ':', otpErr);
                 }
 
-                // Fallback: try resend if signInWithOtp failed
+                // Fallback: try resend on the SAME hive
                 if (!otpSent) {
                     try {
                         var fallbackClient = window.InvestCoreSupabase.getClient({ hiveId: signupHiveId });
                         await fallbackClient.auth.resend({ type: 'signup', email: email });
-                    } catch(fallbackErr) {
-                        console.warn('[Auth] resend fallback also failed:', fallbackErr);
+                    } catch (fallbackErr) {
+                        console.warn('[Auth] resend fallback also failed on hive ' + signupHiveId + ':', fallbackErr);
                     }
                 }
 
@@ -1731,88 +1823,40 @@
                 console.error('[Auth] handleRegister error:', error);
                 setStatus(authStatus, sanitizeError(error.message), 'error');
             } finally {
-                if (otpPurpose !== 'login' || !stepOtp.classList.contains('active')) {
-                    authSubmit.disabled = false;
-                    authSubmit.innerHTML = registerButtonHTML;
-                }
+                authSubmit.disabled = false;
+                authSubmit.innerHTML = REGISTER_BTN_HTML;
             }
         }
 
         /* ==========================================
-           SEND OTP FOR UNCONFIRMED EMAIL
-           ========================================== */
-        async function sendOTPForConfirmation(email) {
-            try {
-                // Use signInWithOtp to send a code; tries across hives
-                var hives = window.InvestCoreSupabase.getUserHives();
-                var sent = false;
-                for (var i = 0; i < hives.length; i++) {
-                    var hiveId = i + 1;
-                    var client = window.InvestCoreSupabase.getClient({ hiveId: hiveId });
-                    var result = await client.auth.signInWithOtp({ email: email, options: { shouldCreateUser: false } });
-                    if (!result.error) {
-                        sent = true;
-                        signupHiveId = hiveId;
-                        break;
-                    }
-                }
-
-                if (sent) {
-                    otpEmailDisplay.textContent = email;
-                    otpDescription.textContent = 'Enter the 6–8 digit verification code sent to your email to confirm your account.';
-                    otpCode.value = '';
-                    hideStatus(otpStatusEl);
-                    showStep('step-otp');
-                    startOtpCountdown();
-                } else {
-                    // Fallback: try resend signup
-                    var client2 = window.InvestCoreSupabase.getClient({ hiveId: 1 });
-                    await client2.auth.resend({ type: 'signup', email: email });
-                    otpEmailDisplay.textContent = email;
-                    otpDescription.textContent = 'Enter the 6–8 digit verification code sent to your email to confirm your account.';
-                    otpCode.value = '';
-                    hideStatus(otpStatusEl);
-                    showStep('step-otp');
-                    startOtpCountdown();
-                }
-            } catch (err) {
-                console.error('[Auth] sendOTPForConfirmation error:', err);
-                setStatus(authStatus, 'Unable to send verification code. Please try again.', 'error');
-            }
-        }
-
-        /* ==========================================
-           RESEND OTP
+           RESEND OTP  — uses signupHiveId ONLY
            ========================================== */
         async function resendOTP() {
+            if (signupHiveId === null || signupHiveId === undefined) {
+                setStatus(otpStatusEl, 'Session expired. Please go back and start again.', 'error');
+                return;
+            }
+
             try {
-                var hives = window.InvestCoreSupabase.getUserHives();
+                var client = window.InvestCoreSupabase.getClient({ hiveId: signupHiveId });
                 var sent = false;
 
                 if (otpPurpose === 'recovery') {
-                    // Resend recovery OTP
-                    for (var i = 0; i < hives.length; i++) {
-                        var hiveId = i + 1;
-                        var client = window.InvestCoreSupabase.getClient({ hiveId: hiveId });
-                        var r = await client.auth.resetPasswordForEmail(currentEmail, {});
-                        if (!r.error) { sent = true; break; }
-                    }
+                    // Resend recovery email on signupHiveId ONLY
+                    var r = await client.auth.resetPasswordForEmail(currentEmail, {});
+                    if (!r.error) { sent = true; }
                 } else {
-                    // Resend signup OTP
-                    for (var j = 0; j < hives.length; j++) {
-                        var hId = j + 1;
-                        var cl = window.InvestCoreSupabase.getClient({ hiveId: hId });
-                        var res = await cl.auth.signInWithOtp({ email: currentEmail, options: { shouldCreateUser: false } });
-                        if (!res.error) { sent = true; break; }
-                    }
-                    // Fallback: try resend signup
-                    if (!sent) {
-                        for (var k = 0; k < hives.length; k++) {
-                            var hId2 = k + 1;
-                            var cl2 = window.InvestCoreSupabase.getClient({ hiveId: hId2 });
-                            var res2 = await cl2.auth.resend({ type: 'signup', email: currentEmail });
-                            if (!res2.error) { sent = true; break; }
-                        }
+                    // Resend signup/login OTP on signupHiveId ONLY
+                    var res = await client.auth.signInWithOtp({
+                        email: currentEmail,
+                        options: { shouldCreateUser: false }
+                    });
+                    if (!res.error) {
+                        sent = true;
+                    } else {
+                        // Fallback: try resend signup on same hive
+                        var res2 = await client.auth.resend({ type: 'signup', email: currentEmail });
+                        if (!res2.error) { sent = true; }
                     }
                 }
 
@@ -1830,7 +1874,9 @@
         }
 
         /* ==========================================
-           OTP FORM SUBMIT
+           OTP FORM SUBMIT  (Flow 3 — THE CRITICAL ONE)
+           This NEVER loops over all hives.
+           Uses ONLY signupHiveId.
            ========================================== */
         otpForm.addEventListener('submit', async function(e) {
             e.preventDefault();
@@ -1841,89 +1887,98 @@
                 return;
             }
 
+            // CRITICAL: signupHiveId must be set
+            if (signupHiveId === null || signupHiveId === undefined) {
+                setStatus(otpStatusEl, 'Session expired. Please go back and start again.', 'error');
+                return;
+            }
+
             otpSubmitBtn.disabled = true;
             otpSubmitBtn.innerHTML = '<span class="btn-spinner"></span> Verifying…';
 
             try {
+                var client = window.InvestCoreSupabase.getClient({ hiveId: signupHiveId });
                 var verified = false;
+                var verifiedUser = null;
                 var lastErr = null;
-                var hives = window.InvestCoreSupabase.getUserHives();
-                var otpType = otpPurpose === 'recovery' ? 'recovery' : (otpPurpose === 'signup' ? 'email' : 'email');
 
-                for (var i = 0; i < hives.length; i++) {
-                    var hiveId = i + 1;
+                // Try type 'email' first
+                try {
+                    var r1 = await client.auth.verifyOtp({
+                        email: currentEmail,
+                        token: code,
+                        type: 'email'
+                    });
+                    if (!r1.error) {
+                        verified = true;
+                        verifiedUser = r1.data && r1.data.user ? r1.data.user : null;
+                    } else {
+                        lastErr = r1.error;
+                    }
+                } catch (e1) {
+                    lastErr = e1;
+                }
+
+                // If 'email' failed, try type 'signup'
+                if (!verified) {
                     try {
-                        var client = window.InvestCoreSupabase.getClient({ hiveId: hiveId });
-                        var result = await client.auth.verifyOtp({
+                        var r2 = await client.auth.verifyOtp({
                             email: currentEmail,
                             token: code,
-                            type: otpType
+                            type: 'signup'
                         });
-
-                        if (!result.error) {
+                        if (!r2.error) {
                             verified = true;
-                            var user = result.data && result.data.user ? result.data.user : null;
-                            if (user && window.InvestCoreSupabase.storeAuthContext) {
-                                window.InvestCoreSupabase.storeAuthContext({
-                                    hiveId: hiveId,
-                                    userId: user.id || '',
-                                    email: user.email || currentEmail,
-                                    fullName: user.user_metadata ? user.user_metadata.full_name || '' : ''
-                                });
-                            }
-                            break;
+                            verifiedUser = r2.data && r2.data.user ? r2.data.user : null;
+                        } else {
+                            lastErr = r2.error;
                         }
-                        lastErr = result.error;
-                    } catch (fetchErr) {
-                        lastErr = fetchErr;
+                    } catch (e2) {
+                        lastErr = e2;
+                    }
+                }
+
+                // If 'signup' failed, try type 'magiclink'
+                if (!verified) {
+                    try {
+                        var r3 = await client.auth.verifyOtp({
+                            email: currentEmail,
+                            token: code,
+                            type: 'magiclink'
+                        });
+                        if (!r3.error) {
+                            verified = true;
+                            verifiedUser = r3.data && r3.data.user ? r3.data.user : null;
+                        } else {
+                            lastErr = r3.error;
+                        }
+                    } catch (e3) {
+                        lastErr = e3;
                     }
                 }
 
                 if (!verified) {
-                    // Also try with 'signup' type
-                    if (otpType === 'email') {
-                        for (var j = 0; j < hives.length; j++) {
-                            var hiveId2 = j + 1;
-                            try {
-                                var client2 = window.InvestCoreSupabase.getClient({ hiveId: hiveId2 });
-                                var result2 = await client2.auth.verifyOtp({
-                                    email: currentEmail,
-                                    token: code,
-                                    type: 'signup'
-                                });
-                                if (!result2.error) {
-                                    verified = true;
-                                    var user2 = result2.data && result2.data.user ? result2.data.user : null;
-                                    if (user2 && window.InvestCoreSupabase.storeAuthContext) {
-                                        window.InvestCoreSupabase.storeAuthContext({
-                                            hiveId: hiveId2,
-                                            userId: user2.id || '',
-                                            email: user2.email || currentEmail,
-                                            fullName: user2.user_metadata ? user2.user_metadata.full_name || '' : ''
-                                        });
-                                    }
-                                    break;
-                                }
-                                lastErr = result2.error;
-                            } catch (fetchErr2) {
-                                lastErr = fetchErr2;
-                            }
-                        }
-                    }
-                }
-
-                if (!verified) {
-                    var errMsg = lastErr ? lastErr.message : '';
+                    // All three types failed on the correct hive
+                    var errMsg = lastErr ? (lastErr.message || '') : '';
                     if (/expired/i.test(errMsg)) throw new Error('Your verification code has expired. Please request a new one.');
                     if (/invalid|incorrect|mismatch/i.test(errMsg)) throw new Error('Invalid code — please check and try again.');
                     if (/fetch|network|CORS/i.test(errMsg)) throw new Error('A connection error occurred. Please check your internet and try again.');
                     throw new Error('Invalid code — please check and try again.');
                 }
 
+                // Store auth context with the CORRECT hive
+                if (verifiedUser && window.InvestCoreSupabase.storeAuthContext) {
+                    window.InvestCoreSupabase.storeAuthContext({
+                        hiveId: signupHiveId,
+                        userId: verifiedUser.id || '',
+                        email: verifiedUser.email || currentEmail,
+                        fullName: verifiedUser.user_metadata ? verifiedUser.user_metadata.full_name || '' : ''
+                    });
+                }
+
                 clearOtpCountdown();
 
                 if (otpPurpose === 'signup') {
-                    // Init user_balances row after successful email verification
                     await initUserBalance();
                     showSuccessAndRedirect(
                         'Email Verified!',
@@ -1936,12 +1991,10 @@
                 } else if (otpPurpose === 'recovery') {
                     // Show new password form — user is now authenticated
                     showStep('step-reset-password');
-                    // Hide the OTP code field since already verified
-                    document.getElementById('resetOtpCode').parentElement.style.display = 'none';
-                    document.getElementById('resetOtpCode').required = false;
-                    document.getElementById('resetOtpCode').value = 'verified';
+                    resetOtpCode.parentElement.style.display = 'none';
+                    resetOtpCode.required = false;
+                    resetOtpCode.value = 'verified';
                 } else if (otpPurpose === 'login') {
-                    // Existing user signed in via OTP — go straight to portfolio
                     showSuccessAndRedirect(
                         'Welcome Back!',
                         'You are now signed in.',
@@ -1958,12 +2011,14 @@
                 otpCode.value = '';
             } finally {
                 otpSubmitBtn.disabled = false;
-                otpSubmitBtn.innerHTML = 'Verify Code <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>';
+                otpSubmitBtn.innerHTML = VERIFY_BTN_HTML;
             }
         });
 
         /* ==========================================
-           RESET — SEND CODE
+           RESET — SEND CODE  (Flow 4 — send)
+           Loops hives to find one that accepts
+           resetPasswordForEmail, records signupHiveId.
            ========================================== */
         resetSendForm.addEventListener('submit', async function(e) {
             e.preventDefault();
@@ -1988,6 +2043,7 @@
                     var response = await client.auth.resetPasswordForEmail(email, {});
                     if (!response.error) {
                         sent = true;
+                        signupHiveId = hiveId;  // RECORD the hive for OTP verification
                         break;
                     }
                     lastErr = response.error;
@@ -2013,12 +2069,14 @@
                 setStatus(resetSendStatus, sanitizeError(error.message), 'error');
             } finally {
                 resetSendBtn.disabled = false;
-                resetSendBtn.innerHTML = 'Send Reset Code <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>';
+                resetSendBtn.innerHTML = SEND_RESET_BTN_HTML;
             }
         });
 
         /* ==========================================
-           RESET — SET NEW PASSWORD
+           RESET — SET NEW PASSWORD  (Flow 4 — update)
+           Uses signupHiveId ONLY for both OTP verify
+           and password update.
            ========================================== */
         resetPasswordForm.addEventListener('submit', async function(e) {
             e.preventDefault();
@@ -2047,42 +2105,44 @@
             resetPasswordBtn.innerHTML = '<span class="btn-spinner"></span> Updating…';
 
             try {
-                var hives = window.InvestCoreSupabase.getUserHives();
+                // Determine which client to use — signupHiveId ONLY
+                var hid = signupHiveId;
+                if (hid === null || hid === undefined) {
+                    hid = window.InvestCoreSupabase.getStoredHiveId();
+                }
+                if (hid === null || hid === undefined) {
+                    throw new Error('Session expired. Please start the password reset process again.');
+                }
 
-                // If OTP field is visible, verify OTP first for recovery
+                var client = window.InvestCoreSupabase.getClient({ hiveId: hid });
+
+                // If OTP field is visible, verify OTP first using signupHiveId ONLY
                 if (otpFieldVisible && otpCodeVal) {
-                    var otpVerified = false;
-                    for (var i = 0; i < hives.length; i++) {
-                        var hiveId = i + 1;
-                        var client = window.InvestCoreSupabase.getClient({ hiveId: hiveId });
-                        var verifyResult = await client.auth.verifyOtp({
-                            email: currentEmail,
-                            token: otpCodeVal,
-                            type: 'recovery'
+                    var verifyResult = await client.auth.verifyOtp({
+                        email: currentEmail,
+                        token: otpCodeVal,
+                        type: 'recovery'
+                    });
+                    if (verifyResult.error) {
+                        throw new Error('Invalid or expired reset code. Please try again.');
+                    }
+                    // Store auth context after successful recovery OTP
+                    var vUser = verifyResult.data && verifyResult.data.user ? verifyResult.data.user : null;
+                    if (vUser && window.InvestCoreSupabase.storeAuthContext) {
+                        window.InvestCoreSupabase.storeAuthContext({
+                            hiveId: hid,
+                            userId: vUser.id || '',
+                            email: vUser.email || currentEmail,
+                            fullName: vUser.user_metadata ? vUser.user_metadata.full_name || '' : ''
                         });
-                        if (!verifyResult.error) {
-                            otpVerified = true;
-                            break;
-                        }
                     }
-                    if (!otpVerified) throw new Error('Invalid or expired reset code. Please try again.');
                 }
 
-                // Now update password
-                var updated = false;
-                var lastErr = null;
-                for (var j = 0; j < hives.length; j++) {
-                    var hId = j + 1;
-                    var cl = window.InvestCoreSupabase.getClient({ hiveId: hId });
-                    var result = await cl.auth.updateUser({ password: newPw });
-                    if (!result.error) {
-                        updated = true;
-                        break;
-                    }
-                    lastErr = result.error;
+                // Now update password using signupHiveId ONLY
+                var result = await client.auth.updateUser({ password: newPw });
+                if (result.error) {
+                    throw result.error;
                 }
-
-                if (!updated) throw (lastErr || new Error('Unable to update password.'));
 
                 showSuccessAndRedirect(
                     'Password Updated!',
@@ -2098,12 +2158,13 @@
                 setStatus(resetPasswordStatus, sanitizeError(err.message), 'error');
             } finally {
                 resetPasswordBtn.disabled = false;
-                resetPasswordBtn.innerHTML = 'Update Password <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>';
+                resetPasswordBtn.innerHTML = UPDATE_PW_BTN_HTML;
             }
         });
 
         /* ==========================================
-           HANDLE URL HASH / PARAMS (Recovery links, etc.)
+           HANDLE URL HASH / PARAMS  (Flow 5)
+           Recovery links, magic link clicks, etc.
            ========================================== */
         (async function handleUrlFlow() {
             var params = new URLSearchParams(window.location.search);
@@ -2133,10 +2194,13 @@
                 return;
             }
 
-            // If access_token in hash (PKCE / implicit flow)
+            /* ---- access_token + refresh_token (PKCE / implicit flow) ----
+               setSession cannot create new users, so looping is safe. */
             if (accessToken && refreshToken) {
                 try {
                     var hives = window.InvestCoreSupabase.getUserHives();
+                    var sessionEstablished = false;
+
                     for (var i = 0; i < hives.length; i++) {
                         var hiveId = i + 1;
                         var client = window.InvestCoreSupabase.getClient({ hiveId: hiveId });
@@ -2145,6 +2209,8 @@
                             refresh_token: refreshToken
                         });
                         if (!sessionResult.error) {
+                            sessionEstablished = true;
+                            signupHiveId = hiveId;
                             var user = sessionResult.data && sessionResult.data.user ? sessionResult.data.user : null;
                             if (user && window.InvestCoreSupabase.storeAuthContext) {
                                 window.InvestCoreSupabase.storeAuthContext({
@@ -2158,24 +2224,25 @@
                         }
                     }
 
-                    if (flowType === 'recovery') {
-                        showStep('step-reset-password');
-                        document.getElementById('resetOtpCode').parentElement.style.display = 'none';
-                        document.getElementById('resetOtpCode').required = false;
-                        document.getElementById('resetOtpCode').value = 'verified';
+                    if (sessionEstablished) {
+                        if (flowType === 'recovery') {
+                            showStep('step-reset-password');
+                            resetOtpCode.parentElement.style.display = 'none';
+                            resetOtpCode.required = false;
+                            resetOtpCode.value = 'verified';
+                        } else {
+                            await initUserBalance();
+                            showSuccessAndRedirect(
+                                'Email Verified!',
+                                'Your account is now active.',
+                                'Your email has been confirmed successfully. Welcome to InvestCore!',
+                                'portfolio.html',
+                                'Go to Portfolio',
+                                5
+                            );
+                        }
                     } else {
-                        showSuccessAndRedirect(
-                            'Email Verified!',
-                            'Your account is now active.',
-                            'Your email has been confirmed successfully. Welcome to InvestCore!',
-                            'portfolio.html',
-                            'Go to Portfolio',
-                            5
-                        );
-                    }
-                    // Init user_balances after PKCE/implicit flow signup verification
-                    if (flowType !== 'recovery') {
-                        await initUserBalance();
+                        setStatus(authStatus, 'Unable to establish session. Please try logging in again.', 'error');
                     }
                 } catch (e) {
                     console.error('[Auth] PKCE/implicit flow error:', e);
@@ -2184,11 +2251,14 @@
                 return;
             }
 
-            // If token_hash in URL (email link click)
+            /* ---- token_hash flows (email link click) ----
+               verifyOtp with token_hash is read-only / hive-agnostic,
+               so looping is safe here. */
             if (tokenHash && flowType) {
                 try {
                     var hives2 = window.InvestCoreSupabase.getUserHives();
                     var verified = false;
+
                     for (var j = 0; j < hives2.length; j++) {
                         var hId = j + 1;
                         var cl = window.InvestCoreSupabase.getClient({ hiveId: hId });
@@ -2198,6 +2268,7 @@
                         });
                         if (!verifyResult.error) {
                             verified = true;
+                            signupHiveId = hId;
                             var tUser = verifyResult.data && verifyResult.data.user ? verifyResult.data.user : null;
                             if (tUser && window.InvestCoreSupabase.storeAuthContext) {
                                 window.InvestCoreSupabase.storeAuthContext({
@@ -2212,16 +2283,13 @@
                     }
 
                     if (verified) {
-                        // Init user_balances after email link verification
-                        if (flowType !== 'recovery') {
-                            await initUserBalance();
-                        }
                         if (flowType === 'recovery') {
                             showStep('step-reset-password');
-                            document.getElementById('resetOtpCode').parentElement.style.display = 'none';
-                            document.getElementById('resetOtpCode').required = false;
-                            document.getElementById('resetOtpCode').value = 'verified';
+                            resetOtpCode.parentElement.style.display = 'none';
+                            resetOtpCode.required = false;
+                            resetOtpCode.value = 'verified';
                         } else {
+                            await initUserBalance();
                             showSuccessAndRedirect(
                                 'Email Verified!',
                                 'Your account is now active.',
